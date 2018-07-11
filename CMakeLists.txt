@@ -15,10 +15,16 @@ endif(NOT DEFINED CUDA_ARCH)
 set(CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS};--std=c++14)
 set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS};-arch=${CUDA_ARCH};-Wno-deprecated-gpu-targets; -lineinfo; -use_fast_math)
 
-set(SOURCES lorenz.cpp)
+set(SOURCES lorenz.cpp plykin_map.cpp plykin_ode.cpp)
 
 set_source_files_properties(
   ${SOURCES} PROPERTIES CUDA_SOURCE_PROPERTY_FORMAT OBJ)
 
-cuda_add_executable(lorenz ${SOURCES})
+cuda_add_executable(lorenz lorenz.cpp)
 target_link_libraries(lorenz ${CUDA_LIBRARIES} png)
+
+cuda_add_executable(plykin_map plykin_map.cpp)
+target_link_libraries(plykin_map ${CUDA_LIBRARIES} png)
+
+cuda_add_executable(plykin_ode plykin_ode.cpp)
+target_link_libraries(plykin_ode ${CUDA_LIBRARIES} png)
