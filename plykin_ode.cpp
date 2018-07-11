@@ -7,8 +7,8 @@ __device__ __forceinline__ float rot_freq(float t)
     float c2 = 5.0;
     float c3 = 6.0;
 
-    if (c0 < t and t < c1) return -1;
-    if (c2 < t and t < c3) return +1;
+    if (c0 <= t and t < c1) return -1;
+    if (c2 <= t and t < c3) return +1;
     return 0;
 
     /*
@@ -43,8 +43,8 @@ __device__ __forceinline__ float diff_rot_freq(float t)
     float c2 = 4.0;
     float c3 = 5.0;
 
-    if (c0 < t and t < c1) return -1;
-    if (c2 < t and t < c3) return +1;
+    if (c0 <= t and t < c1) return -1;
+    if (c2 <= t and t < c3) return +1;
     return 0;
 
     /*
@@ -98,7 +98,7 @@ __device__ __forceinline__ void step(float u[4], float s[2], int n)
 __global__
 void advance(float (*state)[4], int nsteps, int nState)
 {
-    float s[2] = {1.1f, 1.0f};
+    float s[2] = {1.0f, 1.0f};
     int id = blockIdx.x * blockDim.x + threadIdx.x;
     if (id < nState) {
         float u[4];
@@ -109,39 +109,45 @@ void advance(float (*state)[4], int nsteps, int nState)
 }
 
 __global__
-void map(float (*mapped)[2], const float (*state)[4], int nState)
+void map(float (*mapped)[2], const float (*state)[4], float angle, int nState)
 {
     const double PI = atan2(1.0, 0.0) * 2;
     int id = blockIdx.x * blockDim.x + threadIdx.x;
     if (id < nState) {
-        float x = state[id][0];
-        float y = state[id][1];
-	    float z = state[id][2];
+        float x0 = state[id][0];
+        float y0 = state[id][1];
+	    float z0 = state[id][2];
+	    float x = x0 * cos(angle) - y0 * sin(angle);
+	    float y = x0 * sin(angle) + y0 * cos(angle);
+	    float z = z0;
         mapped[id][0] = x;
-        mapped[id][1] = y;
-        if (z < 0) {
-            mapped[id][0] = 200 - x;
+        mapped[id][1] = z;
+        if (y < 0) {
+            mapped[id][0] = 200 - z;
         }
     }
 }
 
-int main()
+int main(int argc, char * argv[])
 {
-    uint32_t nState = 1000000;
+    cudaSetDevice((argc > 1) ? atoi(argv[1]) : 0);
+    uint32_t nState = 10000000;
     float (*cpuState)[4] = new float[nState][4];
     for (int i = 0; i < nState; ++i) {
         cpuState[i][0] = rand() / float(RAND_MAX);
         cpuState[i][1] = rand() / float(RAND_MAX);
         cpuState[i][2] = rand() / float(RAND_MAX);
-        cpuState[i][3] = rand() / float(RAND_MAX);
+        cpuState[i][3] = 0;
     }
     float (*state)[4];
     cudaMalloc(&state, nState * 4 * sizeof(float));
     cudaMemcpy(state, cpuState, nState * 4 * sizeof(float),
                cudaMemcpyHostToDevice);
+
+    int nFrames = 60;
     uint32_t * density, nx = 1920, ny = 1080;
-    cudaMalloc(&density, nx * ny * sizeof(uint32_t));
-    cudaMemset(density, 0, nx * ny * sizeof(uint32_t));
+    cudaMalloc(&density, nFrames * nx * ny * sizeof(uint32_t));
+    cudaMemset(density, 0, nFrames * nx * ny * sizeof(uint32_t));
 
     const double PI = atan2(1.0, 0.0) * 2;
     float dx = 2. / ny;
@@ -154,17 +160,27 @@ int main()
     for (int i = 0; i < 10; ++i) {
         cudaDeviceSynchronize();
         printf("%d\n", i);
-        advance<<<ceil(nState/128.), 128>>>(state, 600, nState);
-        map<<<ceil(nx*ny/128.), 128>>>(mapped, state, nState);
-    
-        draw<2,0,1><<<ceil(nState/128.), 128>>>(
-                density, mapped, nState, -16./9, dx, nx, -1, dx, ny);
+
+        for (int iFrame = 0; iFrame < nFrames; ++iFrame) {
+            advance<<<ceil(nState/128.), 128>>>(state, 10, nState);
+            map<<<ceil(nx*ny/128.), 128>>>(mapped, state,
+                       iFrame * PI / nFrames, nState);
+            draw<2,0,1><<<ceil(nState/128.), 128>>>(
+                    density + iFrame * nx * ny,
+                    mapped, nState, -16./9, dx, nx, -1, dx, ny);
+        }
     }
-    cmap<<<ceil(nx*ny/128.), 128>>>(density, .7, 100, nx * ny);
 
     uint32_t * cpuDensity = new uint32_t[nx * ny];
-    cudaMemcpy(cpuDensity, density, nx * ny * sizeof(uint32_t),
-               cudaMemcpyDeviceToHost);
-    writePng("plykin_ode.png", cpuDensity, nx, ny);
+    for (int iFrame = 0; iFrame < nFrames; ++iFrame) {
+        cmap<<<ceil(nx*ny/128.), 128>>>
+            (density + iFrame * nx * ny, .7, 50, nx * ny);
+        cudaMemcpy(cpuDensity, density + iFrame * nx * ny,
+                   nx * ny * sizeof(uint32_t), cudaMemcpyDeviceToHost);
+        char fname[256];
+        sprintf(fname, "plykin_ode_%03d.png", iFrame);
+        writePng(fname, cpuDensity, nx, ny);
+    }
+
     return 0;
 }

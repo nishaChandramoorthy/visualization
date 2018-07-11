@@ -44,7 +44,7 @@ __device__ __forceinline__ void step(float u[4], float s[2], int n)
 __global__
 void advance(float (*state)[4], int nsteps, int nState)
 {
-    float s[2] = {1.1f, 1.0f};
+    float s[2] = {1.0f, 1.0f};
     int id = blockIdx.x * blockDim.x + threadIdx.x;
     if (id < nState) {
         float u[4];
